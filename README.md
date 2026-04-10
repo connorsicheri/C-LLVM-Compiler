@@ -1,26 +1,24 @@
 # MiniC to LLVM IR Compiler
 
-A compiler for **MiniC** (a subset of C99) that generates LLVM IR bitcode. Built with ANTLR4 for parsing and LLVM 15 for code generation.
+A from-scratch compiler that takes **MiniC** (a strict subset of C99) and produces LLVM IR bitcode. The front end uses ANTLR4 to parse source into a concrete syntax tree, builds a typed AST with embedded grammar actions, runs semantic verification (type checking, scope resolution, symbol table construction), and then lowers the AST to LLVM IR. A custom LLVM `FunctionPass` provides an optimization pipeline — function inlining, constant folding, algebraic simplification, local CSE, DCE, and loop-invariant code motion — all driven by a fixpoint loop so each pass can feed opportunities to the others.
 
-## Pipeline
+## Tested Versions
 
-1. **Parsing** — ANTLR4 grammar (`MiniC.g4`) parses source into a parse tree
-2. **AST Construction** — Embedded actions build a typed Abstract Syntax Tree
-3. **Semantic Analysis** — Symbol table construction and type/scope verification (`VerifyAndBuildSymbols`)
-4. **IR Generation** — LLVM IR emission from the AST (`IRGenerator`)
-5. **Optimization** — Custom LLVM function pass with inlining, constant folding, algebraic simplification, CSE, DCE, and LICM (`Alloca2Reg.cpp`)
-6. **Output** — LLVM bitcode file (default `output.bc`)
+This compiler has been built and tested with the following toolchain:
+
+| Dependency | Version |
+|---|---|
+| **LLVM** | 15.0.7 |
+| **ANTLR4 JAR** (grammar tool) | 4.11.1 (`antlr-4.11.1-complete.jar`) |
+| **ANTLR4 C++ Runtime** | 4.11.1 |
+| **Java** (required by ANTLR4 tool) | 11.0.29 |
+| **GCC** (C / C++) | 13.3.0 |
+| **CMake** | 3.14+ |
+| **C++ Standard** | C++17 |
+
+> Other ANTLR 4.x releases may work but have not been verified. The bundled jar in `thirdparty/` is 4.11.1 and the CMake config looks for `antlr4-runtime 4.11.1`.
 
 ## Building
-
-### Prerequisites
-
-- CMake 3.14+
-- LLVM 15
-- ANTLR4 C++ runtime (4.11.1)
-- Java (for ANTLR4 grammar compilation)
-
-### Build
 
 ```bash
 mkdir build && cd build
@@ -28,10 +26,15 @@ cmake ..
 make
 ```
 
+The build produces three targets:
+- `minicc` — the compiler executable
+- `liballoca2reg.so` — the optimization pass (loaded by `opt`)
+- `libminicio.a` — small I/O runtime linked into compiled programs
+
 ## Usage
 
 ```bash
-# Compile a MiniC source file to LLVM bitcode
+# Compile MiniC source to LLVM bitcode
 ./build/src/minicc input.c -o output.bc
 
 # Print the AST
@@ -47,13 +50,12 @@ make
 ### Running compiled programs
 
 ```bash
-# Compile bitcode to native executable (link with minicio runtime)
 llc-15 output.bc -o output.s
 clang output.s minicio/minicio.c -o program
 ./program
 ```
 
-### Running optimizations
+### Running the optimization pass
 
 ```bash
 opt-15 -O0 -load build/src/liballoca2reg.so output.bc -o output_opt.bc -enable-new-pm=0
@@ -63,22 +65,22 @@ opt-15 -O0 -load build/src/liballoca2reg.so output.bc -o output_opt.bc -enable-n
 
 ```
 ├── grammars/         # ANTLR4 grammar (MiniC.g4)
-├── src/              # Compiler source (AST, semantic analysis, IR generation, optimizations)
-├── minicio/          # Small I/O runtime library (getint, putint, putcharacter, putnewline)
-├── sample/           # Example MiniC programs
-├── cmake/            # CMake modules for ANTLR4
-└── thirdparty/       # ANTLR4 jar
+├── src/              # Compiler source — AST, semantic analysis, IR generation, optimizations
+├── minicio/          # Runtime I/O library (getint, putint, putcharacter, putnewline)
+├── sample/           # Example MiniC programs (factorial, fibonacci, n-queens)
+├── cmake/            # CMake module for ANTLR4 C++ integration
+└── thirdparty/       # Bundled ANTLR4 jar
 ```
 
 ## The MiniC Language
 
-MiniC is a subset of C99. A valid MiniC program is always a valid C99 program. Features include:
+MiniC is a strict subset of C99 — every valid MiniC program is a valid C99 program with identical semantics. It supports:
 
-- Integer, boolean, and character types
-- Arrays
+- `int`, `bool`, and `char` types
+- One-dimensional arrays
 - Functions with pass-by-value parameters
 - Control flow: `if`/`else`, `for`, `while`, `break`, `continue`, `return`
-- Standard arithmetic and logical operators
+- Arithmetic, relational, and logical operators with C-style precedence
 - I/O via `getint()`, `putint()`, `putcharacter()`, `putnewline()`
 
-See `language.txt` for the full grammar specification.
+See `language.txt` for the full reference grammar.
