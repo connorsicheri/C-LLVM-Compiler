@@ -1,0 +1,25 @@
+# Build
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Generated ANTLR artifacts
+grammars/.antlr/
+
+# Compiled outputs
+*.o
+*.bc
+*.so
+*.dylib
+*.a
+output*
+
+# OS
+.DS_Store
+Thumbs.db

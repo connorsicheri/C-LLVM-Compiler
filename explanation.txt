@@ -1,0 +1,97 @@
+opt-15 -O0 -load src/liballoca2reg.so output.bc -o output_opt.bc -enable-new-pm=0
+Open-ended IR Optimization Design Explanation
+
+All optimizations are implemented in src/Alloca2Reg.cpp and run as part of
+the alloca2reg FunctionPass. After alloca-to-register promotion, the pass
+runs the following optimizations in a fixpoint loop until no further changes
+are made:
+
+1. FUNCTION INLINING
+   Small non-recursive functions (<=100 instructions) are inlined at their
+   call sites using LLVM's InlineFunction utility. This is the single most
+   impactful optimization because it exposes callee code to all subsequent
+   passes. For example, in queen.c, markcolumn() and markdiag() are inlined
+   into search(), allowing LICM and CSE to work across the combined code.
+
+2. CONSTANT FOLDING
+   Binary operations (add, sub, mul, sdiv) and integer comparisons (icmp)
+   with both operands being ConstantInt are evaluated at compile time and
+   replaced with the computed constant result.
+
+3. ALGEBRAIC SIMPLIFICATION
+   Applies algebraic identities to simplify expressions:
+   - X + 0 -> X,  0 + X -> X
+   - X - 0 -> X,  X - X -> 0
+   - X * 1 -> X,  1 * X -> X,  X * 0 -> 0,  0 * X -> 0
+   - X / 1 -> X
+
+4. LOCAL COMMON SUBEXPRESSION ELIMINATION (CSE)
+   Within each basic block, if the same binary operation or icmp with
+   identical operands appears twice, the second is replaced with the
+   first's result. Also handles commutative operators (a+b == b+a).
+   Additionally performs load CSE: if the same pointer is loaded twice
+   with no intervening store or call, the second load is eliminated.
+
+5. DEAD CODE ELIMINATION (DCE)
+   Removes instructions that have no uses and no side effects. Cleans up
+   dead computation left behind by constant folding, CSE, and other passes.
+
+6. LOOP-INVARIANT CODE MOTION (LICM)
+   Detects natural loops via back-edge analysis using iterative dominator
+   computation. For each loop, identifies loads from global variables that
+   are not stored to within the loop (with conservative handling of
+   function calls — only known I/O functions like putint/putnewline are
+   considered safe). Hoists these invariant loads to the loop preheader.
+
+FIXPOINT ITERATION
+All passes (except inlining) run in a loop: each pass reports whether it
+made changes, and as long as any pass changes something, the loop repeats.
+This is critical because passes create opportunities for each other:
+- LICM hoists a load -> CSE can eliminate duplicates
+- CSE removes redundancy -> DCE can remove dead instructions
+- DCE cleans up -> may expose more constant folding opportunities
+
+BENCHMARK RESULTS (queen.c, N=13, 5 runs):
+- Baseline (alloca2reg only):    5.13s
+- Optimized:                     4.52s  (12% faster)
+- clang -O3 reference:           1.66s
+
+SAMPLE.C DESIGN AND BENCHMARK
+
+The sample program was deliberately constructed to maximally benefit from
+each of our implemented optimizations working together:
+
+1. INLINING TARGETS: Four small helper functions (getval, setval, gettmp,
+   settmp) wrap array accesses like grid[r*N+c]. Without inlining these are
+   opaque calls that block all other optimizations. With inlining, the array
+   index arithmetic is exposed directly in the caller's loops.
+
+2. LICM TARGETS: After inlining, every helper expands to code that loads
+   the global variable N on each iteration (for the r*N+c index). Since N
+   is never stored to inside the loops, LICM hoists these loads out, saving
+   one global memory read per array access per iteration.
+
+3. CSE TARGETS: The smooth() function reads and writes neighboring cells,
+   which after inlining produces many duplicate i*N computations within the
+   same basic block. CSE detects and eliminates these. Also, load CSE
+   eliminates redundant loads from the same array slot.
+
+4. CONSTANT FOLDING / ALGEBRAIC SIMPLIFICATION: The init() function
+   contains expressions like (i*N+j)*1+0, which fold away to i*N+j.
+
+5. DCE: After CSE replaces duplicate computations and constant folding
+   simplifies expressions, dead intermediate values are left behind. DCE
+   removes them.
+
+6. FIXPOINT INTERACTION: The program benefits from multiple rounds because
+   inlining creates LICM opportunities, LICM creates CSE opportunities
+   (hoisted loads become duplicate), and CSE creates DCE opportunities.
+
+The program runs a grid smoothing kernel (averaging neighbors) for many
+iterations, making it compute-bound with tight inner loops — exactly the
+pattern where our optimizations compound.
+
+Benchmark (N=20, 500000 iterations):
+- Baseline (alloca2reg only):    2.64s
+- Optimized:                     1.99s  (25% faster)
+- clang -O3:                     0.29s

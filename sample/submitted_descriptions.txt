@@ -1,0 +1,5 @@
+Sample 1: factorial.c
+Description: A recursive function to calculate the factorial of a number (6!). It demonstrates function calls, recursion, if-statements, and basic arithmetic.
+
+Sample 2: fibonacci.c
+Description: An iterative function to calculate the Nth Fibonacci number (10th). It demonstrates variable declarations, for-loops, assignment, and local variables.
